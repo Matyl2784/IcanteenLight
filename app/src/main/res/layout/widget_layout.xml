@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🍽 Dnešní oběd"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold"
+        android:textSize="15sp"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:id="@+id/widget_meal_number"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="..."
+        android:textColor="#80CBC4"
+        android:textStyle="bold"
+        android:textSize="14sp"
+        android:layout_marginBottom="2dp" />
+
+    <TextView
+        android:id="@+id/widget_meal_name"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:text="Načítám..."
+        android:textColor="#EEEEEE"
+        android:textSize="13sp"
+        android:ellipsize="end" />
+        
+    <TextView
+        android:id="@+id/widget_sync_time"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="end"
+        android:text="--:--"
+        android:textColor="#88FFFFFF"
+        android:textSize="10sp"
+        android:layout_marginTop="4dp" />
+
+</LinearLayout>
