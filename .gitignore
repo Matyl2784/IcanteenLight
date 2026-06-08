@@ -17,3 +17,4 @@ local.properties
 /app/debug/
 cookies.txt
 *.apk
+*.ps1

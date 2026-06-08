@@ -44,7 +44,7 @@ object NotificationHelper {
         )
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setColor(android.graphics.Color.parseColor("#28a2c4"))
+            .setColor(android.graphics.Color.parseColor("#38faff"))
             .setContentTitle(title)
             .setContentText(content)
             .setStyle(NotificationCompat.BigTextStyle().bigText(content))
