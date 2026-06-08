@@ -77,32 +77,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setupBackgroundWork() {
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-            
-        val currentDate = Calendar.getInstance()
-        val dueDate = Calendar.getInstance()
-        
-        dueDate.set(Calendar.HOUR_OF_DAY, 3)
-        dueDate.set(Calendar.MINUTE, 0)
-        dueDate.set(Calendar.SECOND, 0)
-        
-        if (dueDate.before(currentDate)) {
-            dueDate.add(Calendar.HOUR_OF_DAY, 24)
-        }
-        
-        val timeDiff = dueDate.timeInMillis - currentDate.timeInMillis
-        
-        val dailyWorkRequest = PeriodicWorkRequestBuilder<MenuUpdateWorker>(24, TimeUnit.HOURS)
-            .setInitialDelay(timeDiff, TimeUnit.MILLISECONDS)
-            .setConstraints(constraints)
-            .build()
-            
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "CanteenMenuUpdate",
-            ExistingPeriodicWorkPolicy.UPDATE,
-            dailyWorkRequest
-        )
+        com.icanteen.light.worker.AlarmScheduler.scheduleAlarms(this)
     }
 }

@@ -36,6 +36,8 @@ class PreferencesManager(private val context: Context) {
         // New meals notification
         val KEY_NOTIF_NEW_MEALS_ENABLED = booleanPreferencesKey("notif_new_meals_enabled")
         val KEY_KNOWN_MENU_LAST_DATE = stringPreferencesKey("known_menu_last_date")
+        
+        val KEY_WIDGET_UPDATE_TIME = stringPreferencesKey("widget_update_time")
     }
 
     val usernameFlow: Flow<String?> = context.dataStore.data.map { it[KEY_USERNAME] }
@@ -54,6 +56,8 @@ class PreferencesManager(private val context: Context) {
     val notifDailyTimeFlow: Flow<String> = context.dataStore.data.map { it[KEY_NOTIF_DAILY_TIME] ?: "11:30" }
     val notifNewMealsEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[KEY_NOTIF_NEW_MEALS_ENABLED] ?: false }
     val knownMenuLastDateFlow: Flow<String> = context.dataStore.data.map { it[KEY_KNOWN_MENU_LAST_DATE] ?: "" }
+    
+    val widgetUpdateTimeFlow: Flow<String> = context.dataStore.data.map { it[KEY_WIDGET_UPDATE_TIME] ?: "03:00" }
 
     suspend fun saveCredentials(user: String, pass: String) {
         context.dataStore.edit { prefs ->
@@ -98,6 +102,10 @@ class PreferencesManager(private val context: Context) {
             prefs[KEY_WIDGET_MEAL_NAME] = mealName
             prefs[KEY_WIDGET_LAST_SYNC] = syncTime
         }
+    }
+    
+    suspend fun saveWidgetUpdateTime(time: String) {
+        context.dataStore.edit { it[KEY_WIDGET_UPDATE_TIME] = time }
     }
     
     suspend fun saveNotifWarning(enabled: Boolean, time: String, daysAhead: Int) {

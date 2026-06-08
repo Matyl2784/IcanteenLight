@@ -52,6 +52,8 @@ fun SettingsScreen(prefs: PreferencesManager, onLogout: () -> Unit, onBack: () -
     var dailyEnabled by remember { mutableStateOf(false) }
     var dailyTime by remember { mutableStateOf("11:30") }
     var newMealsEnabled by remember { mutableStateOf(false) }
+    
+    var widgetUpdateTime by remember { mutableStateOf("03:00") }
 
     val context = LocalContext.current
     var permissionRequested by remember { mutableStateOf(false) }
@@ -83,6 +85,7 @@ fun SettingsScreen(prefs: PreferencesManager, onLogout: () -> Unit, onBack: () -
         dailyEnabled = prefs.notifDailyEnabledFlow.firstOrNull() ?: false
         dailyTime = prefs.notifDailyTimeFlow.firstOrNull() ?: "11:30"
         newMealsEnabled = prefs.notifNewMealsEnabledFlow.firstOrNull() ?: false
+        widgetUpdateTime = prefs.widgetUpdateTimeFlow.firstOrNull() ?: "03:00"
     }
 
     Scaffold(
@@ -137,6 +140,29 @@ fun SettingsScreen(prefs: PreferencesManager, onLogout: () -> Unit, onBack: () -
                     coroutineScope.launch {
                         prefs.saveBaseUrl(baseUrl)
                         onBack()
+                    }
+                }
+            }
+
+            SettingsDivider()
+            
+            // ── Widgety ──────────────────────────────────────────────────
+            SettingsSection("Widgety") {
+                Text(
+                    "Čas, kdy se má na pozadí stáhnout a aktualizovat oběd ve widgetech.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+                
+                SettingsTimeRow("Čas automatické aktualizace", widgetUpdateTime) {
+                    showTimePicker(context, widgetUpdateTime) { 
+                        widgetUpdateTime = it
+                        coroutineScope.launch {
+                            prefs.saveWidgetUpdateTime(it)
+                            AlarmScheduler.scheduleAlarms(context)
+                        }
                     }
                 }
             }

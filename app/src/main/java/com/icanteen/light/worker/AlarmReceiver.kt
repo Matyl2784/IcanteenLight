@@ -25,6 +25,15 @@ class AlarmReceiver : BroadcastReceiver() {
                 runBlocking { processWarning(context) }
                 AlarmScheduler.scheduleAlarms(context) // Reschedule for next day
             }
+            AlarmScheduler.ACTION_UPDATE_WIDGET -> {
+                val workRequest = androidx.work.OneTimeWorkRequestBuilder<com.icanteen.light.worker.MenuUpdateWorker>().build()
+                androidx.work.WorkManager.getInstance(context).enqueueUniqueWork(
+                    "CanteenMenuUpdateOneTime",
+                    androidx.work.ExistingWorkPolicy.REPLACE,
+                    workRequest
+                )
+                AlarmScheduler.scheduleAlarms(context) // Reschedule for next day
+            }
         }
     }
 

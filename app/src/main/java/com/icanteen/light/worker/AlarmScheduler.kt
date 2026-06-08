@@ -14,6 +14,7 @@ object AlarmScheduler {
 
     const val ACTION_DAILY_INFO = "com.icanteen.light.ACTION_DAILY_INFO"
     const val ACTION_WARNING = "com.icanteen.light.ACTION_WARNING"
+    const val ACTION_UPDATE_WIDGET = "com.icanteen.light.ACTION_UPDATE_WIDGET"
 
     fun scheduleAlarms(context: Context) {
         runBlocking {
@@ -24,6 +25,8 @@ object AlarmScheduler {
             
             val warningEnabled = prefs.notifWarningEnabledFlow.firstOrNull() ?: false
             val warningTime = prefs.notifWarningTimeFlow.firstOrNull() ?: "18:00"
+            
+            val widgetUpdateTime = prefs.widgetUpdateTimeFlow.firstOrNull() ?: "03:00"
 
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
@@ -57,6 +60,18 @@ object AlarmScheduler {
                 }
             } else {
                 alarmManager.cancel(warningPendingIntent)
+            }
+            
+            // Widget Update
+            val widgetIntent = Intent(context, AlarmReceiver::class.java).apply { action = ACTION_UPDATE_WIDGET }
+            val widgetPendingIntent = PendingIntent.getBroadcast(
+                context, 103, widgetIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val widgetCal = getNextTimeMillis(widgetUpdateTime)
+            if (canScheduleExactAlarms(alarmManager)) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, widgetCal, widgetPendingIntent)
+            } else {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, widgetCal, widgetPendingIntent)
             }
         }
     }
