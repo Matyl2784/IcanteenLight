@@ -6,10 +6,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import com.icanteen.light.MainActivity
 import com.icanteen.light.R
@@ -44,7 +40,7 @@ object NotificationHelper {
         )
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setColor(android.graphics.Color.parseColor("#38faff"))
+            .setColor(android.graphics.Color.parseColor("#28a2c4"))
             .setContentTitle(title)
             .setContentText(content)
             .setStyle(NotificationCompat.BigTextStyle().bigText(content))
