@@ -6,7 +6,10 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import com.icanteen.light.MainActivity
 import com.icanteen.light.R
@@ -37,12 +40,11 @@ object NotificationHelper {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
         val pendingIntent: PendingIntent = PendingIntent.getActivity(
-            context, 0, intent, PendingIntent.FLAG_IMMUTABLE
+            context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground) // Nastav správnou ikonu jestli máš siluetu mísy, teď necháme defaultní Android siluetu
-            .setLargeIcon(BitmapFactory.decodeResource(context.resources, R.mipmap.ic_launcher))
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(android.graphics.Color.parseColor("#28a2c4"))
             .setContentTitle(title)
             .setContentText(content)
             .setStyle(NotificationCompat.BigTextStyle().bigText(content))
