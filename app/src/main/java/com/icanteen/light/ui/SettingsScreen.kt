@@ -305,7 +305,7 @@ fun SettingsScreen(prefs: PreferencesManager, onLogout: () -> Unit, onBack: () -
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    "iCanteen Light  ·  v1.0",
+                    "iCanteen Light  ·  v1.3",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                     letterSpacing = 0.5.sp

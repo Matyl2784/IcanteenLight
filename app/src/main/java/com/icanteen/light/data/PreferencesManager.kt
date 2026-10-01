@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -18,6 +19,7 @@ class PreferencesManager(private val context: Context) {
         val KEY_PASSWORD = stringPreferencesKey("password")
         val KEY_LOGGED_IN = booleanPreferencesKey("is_logged_in")
         val KEY_CACHED_MENU = stringPreferencesKey("cached_menu_json")
+        val KEY_LAST_UPDATE_TIME = longPreferencesKey("last_update_time")
         val KEY_TODAY_WIDGET_TEXT = stringPreferencesKey("today_widget_text") // Deprecated
         val KEY_WIDGET_MEAL_NUMBER = stringPreferencesKey("widget_meal_number")
         val KEY_WIDGET_MEAL_NAME = stringPreferencesKey("widget_meal_name")
@@ -44,6 +46,7 @@ class PreferencesManager(private val context: Context) {
     val passwordFlow: Flow<String?> = context.dataStore.data.map { it[KEY_PASSWORD] }
     val isLoggedInFlow: Flow<Boolean> = context.dataStore.data.map { it[KEY_LOGGED_IN] ?: false }
     val cachedMenuFlow: Flow<String?> = context.dataStore.data.map { it[KEY_CACHED_MENU] }
+    val lastUpdateTimeFlow: Flow<Long> = context.dataStore.data.map { it[KEY_LAST_UPDATE_TIME] ?: 0L }
     val baseUrlFlow: Flow<String> = context.dataStore.data.map { it[KEY_BASE_URL] ?: "https://stravovani.sspbrno.cz" }
     val themeColorFlow: Flow<String> = context.dataStore.data.map { it[KEY_THEME_COLOR] ?: "Neon Teal" }
     val darkModeFlow: Flow<String> = context.dataStore.data.map { it[KEY_DARK_MODE] ?: "Systémový" }
@@ -73,11 +76,15 @@ class PreferencesManager(private val context: Context) {
             prefs.remove(KEY_PASSWORD)
             prefs[KEY_LOGGED_IN] = false
             prefs.remove(KEY_CACHED_MENU)
+            prefs.remove(KEY_LAST_UPDATE_TIME)
         }
     }
 
-    suspend fun saveCachedMenu(json: String) {
-        context.dataStore.edit { it[KEY_CACHED_MENU] = json }
+    suspend fun saveCachedMenu(json: String, timestampMs: Long = System.currentTimeMillis()) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_CACHED_MENU] = json
+            prefs[KEY_LAST_UPDATE_TIME] = timestampMs
+        }
     }
 
     suspend fun saveWidgetText(text: String) {

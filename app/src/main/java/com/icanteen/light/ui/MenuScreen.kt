@@ -1,7 +1,6 @@
 package com.icanteen.light.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -10,12 +9,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -27,6 +26,9 @@ import com.icanteen.light.data.LunchItem
 import com.icanteen.light.data.MenuData
 import com.icanteen.light.data.OrderStatus
 import com.icanteen.light.data.PreferencesManager
+import com.icanteen.light.data.formatLastUpdated
+import com.icanteen.light.data.parseMenuJson
+import com.icanteen.light.data.toJson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
@@ -36,31 +38,69 @@ import kotlinx.coroutines.withContext
 @Composable
 fun MenuScreen(prefs: PreferencesManager, onNavigateSettings: () -> Unit) {
     val coroutineScope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     var menuData by remember { mutableStateOf<MenuData?>(null) }
+    var lastUpdatedMs by remember { mutableStateOf<Long>(0L) }
     var isLoading by remember { mutableStateOf(true) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    var isOffline by remember { mutableStateOf(false) }
     var showAllDays by remember { mutableStateOf(false) }
 
-    fun loadData() {
-        coroutineScope.launch {
-            isLoading = true
-            val user = prefs.usernameFlow.firstOrNull() ?: ""
-            val pass = prefs.passwordFlow.firstOrNull() ?: ""
-            val baseUrl = prefs.baseUrlFlow.firstOrNull() ?: "https://stravovani.sspbrno.cz"
-            val fetchedData = withContext(Dispatchers.IO) {
+    suspend fun fetchOnlineMenu(showOfflineAlert: Boolean = true) {
+        isRefreshing = true
+        val user = prefs.usernameFlow.firstOrNull() ?: ""
+        val pass = prefs.passwordFlow.firstOrNull() ?: ""
+        val baseUrl = prefs.baseUrlFlow.firstOrNull() ?: "https://stravovani.sspbrno.cz"
+
+        val fetchedData = withContext(Dispatchers.IO) {
+            runCatching {
                 val repo = CanteenRepository(baseUrl)
                 val logged = repo.login(user, pass)
                 if (logged) repo.fetchMenu() else null
-            }
-            menuData = fetchedData
-            isLoading = false
+            }.getOrNull()
         }
+
+        if (fetchedData != null && fetchedData.days.isNotEmpty()) {
+            menuData = fetchedData
+            val nowMs = System.currentTimeMillis()
+            lastUpdatedMs = nowMs
+            isOffline = false
+            prefs.saveCachedMenu(fetchedData.toJson(), nowMs)
+        } else {
+            isOffline = true
+            if (showOfflineAlert && menuData != null) {
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar(
+                        message = "Jsi v offline režimu. Nepodařilo se aktualizovat obědy.",
+                        duration = SnackbarDuration.Short
+                    )
+                }
+            }
+        }
+        isLoading = false
+        isRefreshing = false
     }
 
-    LaunchedEffect(Unit) { loadData() }
+    LaunchedEffect(Unit) {
+        // Step 1: Instantly load cached menu and timestamp
+        val cachedJson = prefs.cachedMenuFlow.firstOrNull()
+        val storedTimestamp = prefs.lastUpdateTimeFlow.firstOrNull() ?: 0L
+        val cachedData = parseMenuJson(cachedJson)
+
+        if (cachedData != null && cachedData.days.isNotEmpty()) {
+            menuData = cachedData
+            lastUpdatedMs = storedTimestamp
+            isLoading = false // Show UI right away!
+        }
+
+        // Step 2: Try online fetch in background
+        fetchOnlineMenu(showOfflineAlert = true)
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -71,9 +111,18 @@ fun MenuScreen(prefs: PreferencesManager, onNavigateSettings: () -> Unit) {
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onBackground
                         )
+                        val infoParts = mutableListOf<String>()
                         if (menuData?.userInfo != null) {
+                            val info = menuData!!.userInfo!!
+                            if (info.username.isNotEmpty()) infoParts.add(info.username)
+                            if (info.credit.isNotEmpty()) infoParts.add(info.credit)
+                        }
+                        if (lastUpdatedMs > 0L) {
+                            infoParts.add("Aktualizováno ${formatLastUpdated(lastUpdatedMs)}")
+                        }
+                        if (infoParts.isNotEmpty()) {
                             Text(
-                                "${menuData!!.userInfo!!.username}  ·  ${menuData!!.userInfo!!.credit}",
+                                infoParts.joinToString("  ·  "),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -81,12 +130,25 @@ fun MenuScreen(prefs: PreferencesManager, onNavigateSettings: () -> Unit) {
                     }
                 },
                 actions = {
-                    IconButton(onClick = { loadData() }) {
-                        Icon(
-                            Icons.Filled.Refresh,
-                            contentDescription = "Aktualizovat",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    IconButton(
+                        onClick = {
+                            coroutineScope.launch { fetchOnlineMenu(showOfflineAlert = true) }
+                        },
+                        enabled = !isRefreshing
+                    ) {
+                        if (isRefreshing) {
+                            CircularProgressIndicator(
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(18.dp),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Icon(
+                                Icons.Filled.Refresh,
+                                contentDescription = "Aktualizovat",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                     IconButton(onClick = onNavigateSettings) {
                         Icon(
@@ -115,9 +177,13 @@ fun MenuScreen(prefs: PreferencesManager, onNavigateSettings: () -> Unit) {
             }
         } else if (menuData == null || menuData!!.days.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Nepodařilo se načíst obědy.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Zkontroluj připojení a přihlašovací údaje.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                    Text("Zkontroluj připojení k internetu a přihlašovací údaje.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(onClick = { coroutineScope.launch { fetchOnlineMenu(true) } }) {
+                        Text("Zkusit znovu")
+                    }
                 }
             }
         } else {
@@ -129,6 +195,37 @@ fun MenuScreen(prefs: PreferencesManager, onNavigateSettings: () -> Unit) {
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
             ) {
+                if (isOffline) {
+                    item {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 12.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Filled.Warning,
+                                    contentDescription = "Offline",
+                                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Jsi v offline režimu — zobrazují se uložené obědy.",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
+                    }
+                }
+
                 if (today != null) {
                     item {
                         TodaySection(today)

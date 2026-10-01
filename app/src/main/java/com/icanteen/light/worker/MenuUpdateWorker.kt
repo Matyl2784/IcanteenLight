@@ -6,9 +6,8 @@ import androidx.work.WorkerParameters
 import com.icanteen.light.data.CanteenRepository
 import com.icanteen.light.data.OrderStatus
 import com.icanteen.light.data.PreferencesManager
+import com.icanteen.light.data.toJson
 import kotlinx.coroutines.flow.firstOrNull
-import org.json.JSONArray
-import org.json.JSONObject
 
 class MenuUpdateWorker(
     appContext: Context,
@@ -27,38 +26,8 @@ class MenuUpdateWorker(
 
         val menuData = repo.fetchMenu()
         if (menuData != null) {
-            val rootObj = JSONObject()
-            
-            // Info o uživateli
-            if (menuData.userInfo != null) {
-                val userObj = JSONObject()
-                userObj.put("username", menuData.userInfo.username)
-                userObj.put("credit", menuData.userInfo.credit)
-                rootObj.put("userInfo", userObj)
-            }
-
-            val daysArray = JSONArray()
-            var todayWidgetText = "Na nejbližší dny nemáš objednáno"
-
-            // Uložíme dny do JSON pro UI
-            for (day in menuData.days) {
-                val dayObj = JSONObject()
-                dayObj.put("dayName", day.dayName)
-                dayObj.put("dateStr", day.dateStr)
-
-                val mealsArray = JSONArray()
-                for (meal in day.meals) {
-                    val mealObj = JSONObject()
-                    mealObj.put("mealNumber", meal.mealNumber)
-                    mealObj.put("mealName", meal.mealName)
-                    mealObj.put("status", meal.status.name)
-                    mealObj.put("isOrdered", meal.isOrdered)
-                    mealsArray.put(mealObj)
-                }
-                dayObj.put("meals", mealsArray)
-                daysArray.put(dayObj)
-            }
-            rootObj.put("days", daysArray)
+            val nowMs = System.currentTimeMillis()
+            prefs.saveCachedMenu(menuData.toJson(), nowMs)
 
             // Najdeme první objednaný oběd pro Widget (POUZE PRO DNEŠEK)
             var mealNum = ""
@@ -90,7 +59,6 @@ class MenuUpdateWorker(
             val dateFormat = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
             val syncTime = dateFormat.format(java.util.Date())
 
-            prefs.saveCachedMenu(rootObj.toString())
             prefs.saveWidgetData(mealNum, mealName, syncTime)
 
             // ── New meals notification ──────────────────────────────
