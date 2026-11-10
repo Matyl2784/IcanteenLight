@@ -40,6 +40,7 @@ class PreferencesManager(private val context: Context) {
         val KEY_KNOWN_MENU_LAST_DATE = stringPreferencesKey("known_menu_last_date")
         
         val KEY_WIDGET_UPDATE_TIME = stringPreferencesKey("widget_update_time")
+        val KEY_PRO_VERSION_ENABLED = booleanPreferencesKey("pro_version_enabled")
     }
 
     val usernameFlow: Flow<String?> = context.dataStore.data.map { it[KEY_USERNAME] }
@@ -61,6 +62,7 @@ class PreferencesManager(private val context: Context) {
     val knownMenuLastDateFlow: Flow<String> = context.dataStore.data.map { it[KEY_KNOWN_MENU_LAST_DATE] ?: "" }
     
     val widgetUpdateTimeFlow: Flow<String> = context.dataStore.data.map { it[KEY_WIDGET_UPDATE_TIME] ?: "03:00" }
+    val proVersionEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[KEY_PRO_VERSION_ENABLED] ?: false }
 
     suspend fun saveCredentials(user: String, pass: String) {
         context.dataStore.edit { prefs ->
@@ -132,6 +134,10 @@ class PreferencesManager(private val context: Context) {
     
     suspend fun saveNotifNewMeals(enabled: Boolean) {
         context.dataStore.edit { it[KEY_NOTIF_NEW_MEALS_ENABLED] = enabled }
+    }
+
+    suspend fun saveProVersion(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_PRO_VERSION_ENABLED] = enabled }
     }
 
     /**

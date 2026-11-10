@@ -40,6 +40,7 @@ fun showTimePicker(context: Context, initialTime: String, onTimeSelected: (Strin
 fun SettingsScreen(prefs: PreferencesManager, onLogout: () -> Unit, onBack: () -> Unit) {
     var baseUrl by remember { mutableStateOf("") }
     var selectedDarkMode by remember { mutableStateOf("Systémový") }
+    var proVersionEnabled by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
     var isDarkModeDropdownExpanded by remember { mutableStateOf(false) }
@@ -86,6 +87,7 @@ fun SettingsScreen(prefs: PreferencesManager, onLogout: () -> Unit, onBack: () -
         dailyTime = prefs.notifDailyTimeFlow.firstOrNull() ?: "11:30"
         newMealsEnabled = prefs.notifNewMealsEnabledFlow.firstOrNull() ?: false
         widgetUpdateTime = prefs.widgetUpdateTimeFlow.firstOrNull() ?: "03:00"
+        proVersionEnabled = prefs.proVersionEnabledFlow.firstOrNull() ?: false
     }
 
     Scaffold(
@@ -142,6 +144,29 @@ fun SettingsScreen(prefs: PreferencesManager, onLogout: () -> Unit, onBack: () -
                         onBack()
                     }
                 }
+            }
+
+            SettingsDivider()
+            
+            // ── PRO verze ───────────────────────────────────────────────
+            SettingsSection("PRO verze") {
+                SettingsToggleRow(
+                    label = "Přeobjednávání obědů",
+                    checked = proVersionEnabled,
+                    onCheckedChange = {
+                        proVersionEnabled = it
+                        coroutineScope.launch {
+                            prefs.saveProVersion(it)
+                        }
+                    }
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "Funguje pouze v online režimu",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
             }
 
             SettingsDivider()

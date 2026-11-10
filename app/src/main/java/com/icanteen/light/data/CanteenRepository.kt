@@ -49,6 +49,8 @@ class CanteenRepository(baseUrl: String = "https://stravovani.sspbrno.cz") {
             val formBodyBuilder = FormBody.Builder()
                 .add("j_username", user)
                 .add("j_password", pass)
+                .add("terminal", "false")
+                .add("targetUrl", "/faces/secured/main.jsp?terminal=false&status=true&printer=&keyboard=")
             
             if (csrfToken.isNotEmpty()) {
                 formBodyBuilder.add("_csrf", csrfToken)
@@ -74,18 +76,32 @@ class CanteenRepository(baseUrl: String = "https://stravovani.sspbrno.cz") {
         }
     }
 
-    fun fetchMenu(): MenuData? {
+    fun fetchMenuHtmlRaw(): String? {
         return try {
-            val request = Request.Builder().url(MAIN_URL).build()
+            // Replicate browser flow: initialize JSF session view on main.jsp
+            val mainReq = Request.Builder()
+                .url("$BASE_URL/faces/secured/main.jsp?terminal=false&status=true&printer=&keyboard=")
+                .header("Referer", LOGIN_URL)
+                .build()
+            client.newCall(mainReq).execute().close()
+
+            // Fetch month.jsp
+            val request = Request.Builder()
+                .url(MAIN_URL)
+                .header("Referer", "$BASE_URL/faces/secured/main.jsp")
+                .build()
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
-                val html = response.body?.string() ?: return null
-                parseMenuHtml(html)
+                if (!response.isSuccessful) null else response.body?.string()
             }
         } catch (e: Exception) {
             Log.e("CanteenRepo", "Fetch menu failed", e)
             null
         }
+    }
+
+    fun fetchMenu(): MenuData? {
+        val html = fetchMenuHtmlRaw() ?: return null
+        return parseMenuHtml(html)
     }
 
     private fun parseMenuHtml(html: String): MenuData {
@@ -147,8 +163,24 @@ class CanteenRepository(baseUrl: String = "https://stravovani.sspbrno.cz") {
                     if (mealName.isEmpty()) continue
                     
                     val status = determineStatus(item)
-                    val btnElem = item.select("a.btn").first()
-                    val orderCommand = btnElem?.attr("onclick")
+                    val btnElem = item.select("[onclick*='ajaxOrder'], [onclick*='dbProcessOrder'], [href*='dbProcessOrder'], a.btn, button.btn").first()
+                        ?: item.select("a, button, span, div").find { it.attr("onclick").contains("ajaxOrder") || it.attr("onclick").contains("dbProcessOrder") || it.attr("href").contains("dbProcessOrder") }
+
+                    val rawOnclick = btnElem?.attr("onclick") ?: ""
+                    val rawHref = btnElem?.attr("href") ?: ""
+                    val itemHtml = item.html()
+
+                    val orderCommand = when {
+                        rawOnclick.isNotEmpty() -> extractOrderPath(rawOnclick)
+                        rawHref.contains("dbProcessOrder") -> extractOrderPath(rawHref)
+                        else -> {
+                            val match = Regex("""ajaxOrder\s*\([^,]*,\s*['"]([^'"]+)['"]""").find(itemHtml)
+                                ?: Regex("""['"]([^'"]*db/dbProcessOrder\.jsp[^'"]*)['"]""").find(itemHtml)
+                                ?: Regex("""(?<=ajaxOrder\(this, ')[^']+(?=')""").find(itemHtml)
+                            match?.groupValues?.getOrNull(1)?.replace("&amp;", "&")?.replace("amp;", "&")?.trim()
+                                ?: match?.value?.replace("&amp;", "&")?.replace("amp;", "&")?.trim()
+                        }
+                    }
                     
                     dayMeals.add(LunchItem(
                         mealNumber = mealNumber,
@@ -179,9 +211,11 @@ class CanteenRepository(baseUrl: String = "https://stravovani.sspbrno.cz") {
     }
 
     private fun determineStatus(element: org.jsoup.nodes.Element): OrderStatus {
-        val btn = element.select("a.btn").first()
+        val btn = element.select("[onclick*='ajaxOrder'], [onclick*='dbProcessOrder'], a.btn, button.btn").first()
+            ?: element.select("a, button, span").first()
         val btnText = btn?.text()?.lowercase() ?: ""
         val text = element.text().lowercase()
+        val html = element.html().lowercase()
         
         // Priority 1: Served (Vydáno)
         if (text.contains("vydáno") || element.select(".icon-vydano").isNotEmpty()) {
@@ -190,23 +224,140 @@ class CanteenRepository(baseUrl: String = "https://stravovani.sspbrno.cz") {
         
         // Ordered meals have a checkmark icon or "zrušit" text/button class
         val hasCheck = element.select(".fa-check, .icon-ok, .jidelnicekItem-ordered").isNotEmpty() || btn?.hasClass("ordered") == true
-        val isOrdered = hasCheck || btnText.contains("zrušit")
+        val isOrdered = hasCheck || btnText.contains("zrušit") || text.contains("máte objednáno")
         
         if (isOrdered) {
             // Cannot cancel anymore
-            if (btnText.contains("nelze") || text.contains("nelze") || btn?.hasClass("disabled") == true) {
+            if (btnText.contains("nelze") || text.contains("nelze zrušit") || text.contains("nelze změnit") || btn?.hasClass("disabled") == true) {
                 return OrderStatus.ORDERED_LOCKED
             }
             return OrderStatus.ORDERED
         } else {
             // Not ordered
-            if (btnText.contains("nelze") || text.contains("nelze") || text.contains("expirovalo") || text.contains("uzavřeno") || btn?.hasClass("disabled") == true) {
+            if (btnText.contains("nelze") || text.contains("nelze objednat") || text.contains("expirovalo") || text.contains("uzavřeno") || btn?.hasClass("disabled") == true) {
                 return OrderStatus.LOCKED
-            } else if (btnText.contains("objednat") || btnText.contains("přeobjednat") || btn?.hasClass("enabled") == true || btn != null) {
+            } else if (btnText.contains("objednat") || btnText.contains("přeobjednat") || btn?.hasClass("enabled") == true || html.contains("ajaxorder") || (btn != null && btn.attr("onclick").contains("ajaxOrder"))) {
                 return OrderStatus.AVAILABLE
             }
         }
         
         return OrderStatus.NOT_AVAILABLE
+    }
+
+    fun extractOrderPath(raw: String): String {
+        var s = raw.trim()
+        val match = Regex("""ajaxOrder\s*\([^,]*,\s*['"]([^'"]+)['"]""").find(s)
+        if (match != null) {
+            s = match.groupValues[1]
+        } else {
+            val quoteMatch = Regex("""['"]([^'"]*db/dbProcessOrder\.jsp[^'"]*)['"]""").find(s)
+            if (quoteMatch != null) {
+                s = quoteMatch.groupValues[1]
+            }
+        }
+        return s.replace("&amp;", "&").replace("amp;", "&").trim()
+    }
+
+    fun changeOrder(
+        dateStr: String,
+        mealNumber: String,
+        user: String,
+        pass: String,
+        isCancel: Boolean
+    ): Result<MenuData> {
+        return try {
+            // Step 1: Login fresh session
+            if (!login(user, pass)) {
+                return Result.failure(Exception("Přihlášení do iCanteen selhalo. Zkontroluj přihlašovací údaje v Nastavení."))
+            }
+
+            // Step 2: Initialize JSF session and get LIVE month page HTML
+            val monthHtml = fetchMenuHtmlRaw()
+                ?: return Result.failure(Exception("Nepodařilo se načíst aktuální data z iCanteen."))
+
+            // Step 3: Find the live meal item in this exact session
+            val liveMenuData = parseMenuHtml(monthHtml)
+            val cleanDate = dateStr.trim()
+            val targetDay = liveMenuData.days.find { 
+                it.dateStr.trim() == cleanDate || it.dateStr.contains(cleanDate) || cleanDate.contains(it.dateStr.trim())
+            } ?: return Result.failure(Exception("Den $cleanDate nebyl v jídelníčku nalezen."))
+
+            val cleanNum = mealNumber.trim()
+            val targetMeal = targetDay.meals.find { it.mealNumber.trim() == cleanNum }
+                ?: return Result.failure(Exception("Oběd č. $cleanNum nebyl pro den $cleanDate nalezen."))
+
+            val rawCommand = targetMeal.orderCommand
+            if (rawCommand.isNullOrBlank()) {
+                return Result.failure(Exception("Jídelna v tento moment nepovoluje změnu tohoto oběda."))
+            }
+
+            val targetPath = extractOrderPath(rawCommand)
+            if (targetPath.isBlank()) {
+                return Result.failure(Exception("Neplatný odkaz pro objednání."))
+            }
+
+            val fullUrl = when {
+                targetPath.startsWith("http://") || targetPath.startsWith("https://") -> targetPath
+                targetPath.startsWith("/faces/") -> "$BASE_URL$targetPath"
+                targetPath.startsWith("faces/") -> "$BASE_URL/$targetPath"
+                targetPath.startsWith("/") -> "$BASE_URL/faces/secured$targetPath"
+                else -> "$BASE_URL/faces/secured/$targetPath"
+            }
+
+            Log.d("CanteenRepo", "Executing order: $fullUrl (isCancel=$isCancel)")
+
+            // Step 4: Execute the AJAX GET request
+            val orderReq = Request.Builder()
+                .url(fullUrl)
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("Accept", "*/*")
+                .header("Referer", MAIN_URL)
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
+                .build()
+
+            val responseBody = client.newCall(orderReq).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return Result.failure(Exception("Server iCanteen vrátil kód ${response.code}."))
+                }
+                response.body?.string() ?: ""
+            }
+
+            Log.d("CanteenRepo", "Order response body: $responseBody")
+
+            val lowerBody = responseBody.lowercase()
+            if (lowerBody.contains("přihlášení uživatele") || lowerBody.contains("login.jsp")) {
+                return Result.failure(Exception("Vypršela platnost přihlášení."))
+            }
+            if (lowerBody.contains("error") || lowerBody.contains("fail") || (lowerBody.contains("chyba") && !lowerBody.contains("bez chyb"))) {
+                val cleanErr = Jsoup.parse(responseBody).text().take(120).trim()
+                val msg = if (cleanErr.isNotBlank() && cleanErr.length > 5) cleanErr else "Jídelna objednávku odmítla (např. uzávěrka nebo nedostatek kreditu)."
+                return Result.failure(Exception(msg))
+            }
+
+            // Step 5: Fetch updated menu to verify change on server
+            val updatedHtml = fetchMenuHtmlRaw()
+                ?: return Result.failure(Exception("Objednávka byla odeslána, ale nepodařilo se ověřit stav."))
+            val updatedMenu = parseMenuHtml(updatedHtml)
+
+            val updatedDay = updatedMenu.days.find { 
+                it.dateStr.trim() == cleanDate || it.dateStr.contains(cleanDate) || cleanDate.contains(it.dateStr.trim())
+            }
+            val updatedMeal = updatedDay?.meals?.find { it.mealNumber.trim() == cleanNum }
+
+            if (isCancel) {
+                if (updatedMeal?.isOrdered == true) {
+                    return Result.failure(Exception("Jídelna oběd neodhlásila. Zkontrolujte stav přímo v iCanteen."))
+                }
+            } else {
+                if (updatedMeal?.isOrdered != true) {
+                    return Result.failure(Exception("Jídelna změnu nepotvrdila (zkontrolujte kredit nebo termín)."))
+                }
+            }
+
+            Result.success(updatedMenu)
+        } catch (e: Exception) {
+            Log.e("CanteenRepo", "changeOrder failed", e)
+            Result.failure(e)
+        }
     }
 }

@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -34,6 +35,12 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+data class PendingOrderAction(
+    val day: DayMenu,
+    val meal: LunchItem,
+    val isCancel: Boolean
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MenuScreen(prefs: PreferencesManager, onNavigateSettings: () -> Unit) {
@@ -46,6 +53,32 @@ fun MenuScreen(prefs: PreferencesManager, onNavigateSettings: () -> Unit) {
     var isRefreshing by remember { mutableStateOf(false) }
     var isOffline by remember { mutableStateOf(false) }
     var showAllDays by remember { mutableStateOf(false) }
+
+    val isProMode by prefs.proVersionEnabledFlow.collectAsState(initial = false)
+    val context = LocalContext.current
+    var pendingAction by remember { mutableStateOf<PendingOrderAction?>(null) }
+    var isExecutingOrder by remember { mutableStateOf(false) }
+    var executingMessage by remember { mutableStateOf("") }
+
+    val handleOrderMeal = { dayMenu: DayMenu, meal: LunchItem ->
+        if (isOffline) {
+            coroutineScope.launch {
+                snackbarHostState.showSnackbar("V offline režimu nelze přeobjednat.")
+            }
+        } else {
+            pendingAction = PendingOrderAction(dayMenu, meal, isCancel = false)
+        }
+    }
+
+    val handleCancelOrder = { dayMenu: DayMenu, meal: LunchItem ->
+        if (isOffline) {
+            coroutineScope.launch {
+                snackbarHostState.showSnackbar("V offline režimu nelze zrušit oběd.")
+            }
+        } else {
+            pendingAction = PendingOrderAction(dayMenu, meal, isCancel = true)
+        }
+    }
 
     suspend fun fetchOnlineMenu(showOfflineAlert: Boolean = true) {
         isRefreshing = true
@@ -105,12 +138,30 @@ fun MenuScreen(prefs: PreferencesManager, onNavigateSettings: () -> Unit) {
             TopAppBar(
                 title = {
                     Column {
-                        Text(
-                            "iCanteen Light",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "iCanteen Light",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                            if (isProMode) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                ) {
+                                    Text(
+                                        "PRO",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
                         val infoParts = mutableListOf<String>()
                         if (menuData?.userInfo != null) {
                             val info = menuData!!.userInfo!!
@@ -228,7 +279,12 @@ fun MenuScreen(prefs: PreferencesManager, onNavigateSettings: () -> Unit) {
 
                 if (today != null) {
                     item {
-                        TodaySection(today)
+                        TodaySection(
+                            dayMenu = today,
+                            isProMode = isProMode,
+                            onOrderMeal = { d, m -> handleOrderMeal(d, m) },
+                            onCancelOrder = { d, m -> handleCancelOrder(d, m) }
+                        )
                         Spacer(modifier = Modifier.height(12.dp))
                         StatisticsPanel(days = days)
                         Spacer(modifier = Modifier.height(24.dp))
@@ -242,7 +298,12 @@ fun MenuScreen(prefs: PreferencesManager, onNavigateSettings: () -> Unit) {
                 val displayedDays = if (showAllDays) remainingDays else remainingDays.take(2)
 
                 items(items = displayedDays, key = { it.dateStr }) { dayMenu ->
-                    DayMenuCard(dayMenu)
+                    DayMenuCard(
+                        dayMenu = dayMenu,
+                        isProMode = isProMode,
+                        onOrderMeal = { d, m -> handleOrderMeal(d, m) },
+                        onCancelOrder = { d, m -> handleCancelOrder(d, m) }
+                    )
                     Spacer(modifier = Modifier.height(10.dp))
                 }
 
@@ -270,6 +331,125 @@ fun MenuScreen(prefs: PreferencesManager, onNavigateSettings: () -> Unit) {
                 item { Spacer(modifier = Modifier.height(24.dp)) }
             }
         }
+
+        if (pendingAction != null) {
+            val action = pendingAction!!
+            val isCancel = action.isCancel
+            val hasOrdered = action.day.orderedMeal != null && !isCancel
+            val title = when {
+                isCancel -> "Odhlásit oběd"
+                hasOrdered -> "Přeobjednat oběd"
+                else -> "Objednat oběd"
+            }
+            val confirmBtnText = when {
+                isCancel -> "Odhlásit"
+                hasOrdered -> "Přeobjednat"
+                else -> "Objednat"
+            }
+            val description = if (isCancel) {
+                "Opravdu chceš odhlásit:\n${action.meal.mealNumber} · ${action.meal.mealName}\n(${action.day.dayName} ${action.day.dateStr})?"
+            } else {
+                "Chceš ${if (hasOrdered) "přeobjednat na" else "objednat"}:\n${action.meal.mealNumber} · ${action.meal.mealName}\n(${action.day.dayName} ${action.day.dateStr})?"
+            }
+
+            AlertDialog(
+                onDismissRequest = { pendingAction = null },
+                title = {
+                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                },
+                text = {
+                    Text(description, style = MaterialTheme.typography.bodyMedium)
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val act = action
+                            pendingAction = null
+                            coroutineScope.launch {
+                                isExecutingOrder = true
+                                executingMessage = if (act.isCancel) "Odhlašuji oběd…" else "Objednávám oběd…"
+
+                                val user = prefs.usernameFlow.firstOrNull() ?: ""
+                                val pass = prefs.passwordFlow.firstOrNull() ?: ""
+                                val baseUrl = prefs.baseUrlFlow.firstOrNull() ?: "https://stravovani.sspbrno.cz"
+
+                                val result = withContext(Dispatchers.IO) {
+                                    val repo = CanteenRepository(baseUrl)
+                                    repo.changeOrder(
+                                        dateStr = act.day.dateStr,
+                                        mealNumber = act.meal.mealNumber,
+                                        user = user,
+                                        pass = pass,
+                                        isCancel = act.isCancel
+                                    )
+                                }
+
+                                isExecutingOrder = false
+
+                                if (result.isSuccess) {
+                                    val updated = result.getOrThrow()
+                                    menuData = updated
+                                    val nowMs = System.currentTimeMillis()
+                                    lastUpdatedMs = nowMs
+                                    isOffline = false
+                                    prefs.saveCachedMenu(updated.toJson(), nowMs)
+                                    try {
+                                        com.icanteen.light.widget.updateAllWidgets(context)
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                    }
+                                    snackbarHostState.showSnackbar(
+                                        if (act.isCancel) "✓ Oběd byl úspěšně odhlášen" else "✓ Oběd byl úspěšně změněn"
+                                    )
+                                } else {
+                                    val msg = result.exceptionOrNull()?.message ?: "Neznámá chyba"
+                                    snackbarHostState.showSnackbar(msg)
+                                }
+                            }
+                        },
+                        colors = if (isCancel) {
+                            ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError
+                            )
+                        } else {
+                            ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    ) {
+                        Text(confirmBtnText, fontWeight = FontWeight.SemiBold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingAction = null }) {
+                        Text("Zpět")
+                    }
+                }
+            )
+        }
+
+        if (isExecutingOrder) {
+            AlertDialog(
+                onDismissRequest = {},
+                confirmButton = {},
+                text = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.5.dp,
+                            modifier = Modifier.size(24.dp),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(executingMessage, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -291,7 +471,12 @@ fun SectionLabel(text: String) {
 // Today card — premium: single teal accent bar on the left, clean bg
 // ─────────────────────────────────────────────────────────────
 @Composable
-fun TodaySection(dayMenu: DayMenu) {
+fun TodaySection(
+    dayMenu: DayMenu,
+    isProMode: Boolean = false,
+    onOrderMeal: (DayMenu, LunchItem) -> Unit = { _, _ -> },
+    onCancelOrder: (DayMenu, LunchItem) -> Unit = { _, _ -> }
+) {
     val orderedMeal = dayMenu.orderedMeal
     val hasOrder = orderedMeal != null
     val isServed = orderedMeal?.status == OrderStatus.SERVED
@@ -327,7 +512,10 @@ fun TodaySection(dayMenu: DayMenu) {
                     .padding(horizontal = 16.dp, vertical = 16.dp)
             ) {
                 if (hasOrder) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
                             text = orderedMeal!!.mealNumber,
                             style = MaterialTheme.typography.titleSmall,
@@ -337,6 +525,28 @@ fun TodaySection(dayMenu: DayMenu) {
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         StatusChip(if (isServed) "Vydáno" else "Objednáno")
+
+                        if (isProMode && orderedMeal.status == OrderStatus.ORDERED && !orderedMeal.orderCommand.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.weight(1f))
+                            OutlinedButton(
+                                onClick = { onCancelOrder(dayMenu, orderedMeal) },
+                                modifier = Modifier
+                                    .width(88.dp)
+                                    .height(26.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                shape = RoundedCornerShape(6.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error
+                                ),
+                                border = ButtonDefaults.outlinedButtonBorder.copy(
+                                    brush = androidx.compose.ui.graphics.SolidColor(
+                                        MaterialTheme.colorScheme.error.copy(alpha = 0.45f)
+                                    )
+                                )
+                            ) {
+                                Text("Zrušit", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
+                            }
+                        }
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
@@ -365,10 +575,16 @@ fun TodaySection(dayMenu: DayMenu) {
 
     if (otherMeals.isNotEmpty()) {
         Spacer(modifier = Modifier.height(12.dp))
-        SectionLabel("Ostatní možnosti dnes")
+        SectionLabel(if (orderedMeal != null) "Ostatní možnosti dnes" else "Dnešní nabídka")
         Spacer(modifier = Modifier.height(6.dp))
         otherMeals.forEach { meal ->
-            MealRow(meal)
+            MealRow(
+                meal = meal,
+                dayMenu = dayMenu,
+                isProMode = isProMode,
+                onOrderMeal = onOrderMeal,
+                onCancelOrder = onCancelOrder
+            )
             Spacer(modifier = Modifier.height(4.dp))
         }
     }
@@ -378,7 +594,12 @@ fun TodaySection(dayMenu: DayMenu) {
 // Day card — subtle surface, no colored background
 // ─────────────────────────────────────────────────────────────
 @Composable
-fun DayMenuCard(dayMenu: DayMenu) {
+fun DayMenuCard(
+    dayMenu: DayMenu,
+    isProMode: Boolean = false,
+    onOrderMeal: (DayMenu, LunchItem) -> Unit = { _, _ -> },
+    onCancelOrder: (DayMenu, LunchItem) -> Unit = { _, _ -> }
+) {
     val isUrgent = dayMenu.orderedMeal == null && dayMenu.meals.isNotEmpty()
 
     Surface(
@@ -423,6 +644,23 @@ fun DayMenuCard(dayMenu: DayMenu) {
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
                     }
+                } else if (isProMode && dayMenu.orderedMeal != null) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                MaterialTheme.colorScheme.primaryContainer,
+                                RoundedCornerShape(4.dp)
+                            )
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "Objednáno",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             }
 
@@ -434,7 +672,13 @@ fun DayMenuCard(dayMenu: DayMenu) {
             // Meals list
             Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
                 dayMenu.meals.forEach { meal ->
-                    MealRow(meal)
+                    MealRow(
+                        meal = meal,
+                        dayMenu = dayMenu,
+                        isProMode = isProMode,
+                        onOrderMeal = onOrderMeal,
+                        onCancelOrder = onCancelOrder
+                    )
                     Spacer(modifier = Modifier.height(3.dp))
                 }
             }
@@ -446,10 +690,17 @@ fun DayMenuCard(dayMenu: DayMenu) {
 // Meal row — no colored background per row; only indicator dots
 // ─────────────────────────────────────────────────────────────
 @Composable
-fun MealRow(meal: LunchItem) {
+fun MealRow(
+    meal: LunchItem,
+    dayMenu: DayMenu,
+    isProMode: Boolean = false,
+    onOrderMeal: (DayMenu, LunchItem) -> Unit = { _, _ -> },
+    onCancelOrder: (DayMenu, LunchItem) -> Unit = { _, _ -> }
+) {
     val isOrdered = meal.status == OrderStatus.ORDERED || meal.status == OrderStatus.ORDERED_LOCKED
     val isAvailable = meal.status == OrderStatus.AVAILABLE
     val isLocked = meal.status == OrderStatus.LOCKED || meal.status == OrderStatus.NOT_AVAILABLE
+    val canAct = isProMode && ((isAvailable && !meal.orderCommand.isNullOrBlank()) || (meal.status == OrderStatus.ORDERED && !meal.orderCommand.isNullOrBlank()))
 
     val indicatorColor = when {
         isOrdered   -> MaterialTheme.colorScheme.primary
@@ -494,9 +745,52 @@ fun MealRow(meal: LunchItem) {
             modifier = Modifier.weight(1f)
         )
 
-        if (isOrdered) {
+        if (canAct) {
             Spacer(modifier = Modifier.width(8.dp))
-            StatusChip(if (meal.status == OrderStatus.ORDERED_LOCKED) "Uzamčeno" else "Objednáno")
+            if (meal.status == OrderStatus.ORDERED) {
+                OutlinedButton(
+                    onClick = { onCancelOrder(dayMenu, meal) },
+                    modifier = Modifier
+                        .width(88.dp)
+                        .height(26.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                    shape = RoundedCornerShape(6.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                        brush = androidx.compose.ui.graphics.SolidColor(
+                            MaterialTheme.colorScheme.error.copy(alpha = 0.45f)
+                        )
+                    )
+                ) {
+                    Text("Zrušit", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
+                }
+            } else if (isAvailable) {
+                val hasOrderedMealOnDay = dayMenu.orderedMeal != null
+                val label = if (hasOrderedMealOnDay) "Přeobjednat" else "Objednat"
+                OutlinedButton(
+                    onClick = { onOrderMeal(dayMenu, meal) },
+                    modifier = Modifier
+                        .width(88.dp)
+                        .height(26.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                    shape = RoundedCornerShape(6.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    ),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                        brush = androidx.compose.ui.graphics.SolidColor(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                        )
+                    )
+                ) {
+                    Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
+                }
+            }
+        } else if (isOrdered) {
+            if (!isProMode || meal.status == OrderStatus.ORDERED_LOCKED) {
+                Spacer(modifier = Modifier.width(8.dp))
+                StatusChip(if (meal.status == OrderStatus.ORDERED_LOCKED) "Uzamčeno" else "Objednáno")
+            }
         }
     }
 }
